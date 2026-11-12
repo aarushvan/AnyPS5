@@ -81,11 +81,15 @@ std::int32_t APS5_VABI sceZlibInflate(const void* source, std::uint32_t sourceLe
         (decoded == Z_BUF_ERROR && stream.avail_out == 0 && stream.avail_in != 0 ? NO_SPACE : FATAL);
     const int ended = inflateEnd(&stream);
     if (ended != Z_OK) throw std::runtime_error("sceZlibInflate: decoder cleanup failed");
-    const std::uint64_t id = nextId++;
+    const std::uint64_t id = nextId;
+    const int savedErrno = errno;
+    const bool copied = GuestCopyOut_nid_no_patch(requestId, &id, sizeof(id));
+    errno = savedErrno;
+    if (!copied) return INVALID_ARGUMENT;
     results[id] = InflateResult{produced, status};
     completed.push_back(id);
+    ++nextId;
     completion.NotifyOne();
-    *requestId = id;
     return 0;
 }
 
