@@ -157,6 +157,22 @@ static void WaitPointers() {
     const auto compressed = Compressed(1, expected);
     alignas(2048) std::array<unsigned char, 2048> output{};
     std::uint64_t id = 0;
+    for (auto* failedId : {unwritableResult, crossingResult, readOnlyResult}) {
+        resultMemory.Reset();
+        resultMemory.Protect(failedId == readOnlyResult);
+        errno = EDOM;
+        Require(sceZlibInflate(compressed.data(), compressed.size(), output.data(), output.size(), failedId) == invalid);
+        Require(errno == EDOM);
+        completed = 0x12345678;
+        Require(sceZlibWaitForDone(&completed, readOnlyTimeout) == timedOut);
+        Require(completed == 0x12345678);
+        if (failedId == readOnlyResult) {
+            for (std::size_t index = 0; index < sizeof(std::uint64_t); ++index)
+                Require(reinterpret_cast<unsigned char*>(failedId)[index] == 0xa5);
+        }
+    }
+    resultMemory.Reset();
+    completed = 0;
     Require(sceZlibInflate(compressed.data(), compressed.size(), output.data(), output.size(), &id) == 0);
     errno = EDOM;
     Require(sceZlibWaitForDone(&completed, unreadableTimeout) == invalid);
