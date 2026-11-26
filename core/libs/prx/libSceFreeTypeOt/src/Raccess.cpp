@@ -262,7 +262,13 @@ int APS5_VABI FT_Raccess_Get_DataOffsets_nid_postfix(GuestRaccessLibrary* librar
                 NotImplemented_nid_no_patch(function);
             }
         }
-        auto* result = static_cast<std::int64_t*>(OtMemRealloc(memory, sizeof(std::int64_t), 0, refs, nullptr, &error));
+        std::int64_t* result;
+        try {
+            result = static_cast<std::int64_t*>(OtMemRealloc(memory, sizeof(std::int64_t), 0, refs, nullptr, &error));
+        } catch (...) {
+            OtMemFree(memory, ref);
+            throw;
+        }
         if (!error) {
             for (std::int64_t index = 0; index < refs; ++index) {
                 result[index] = Add(rdataPos, static_cast<std::int64_t>(ref[index].offset), function);
