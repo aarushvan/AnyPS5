@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <stdexcept>
 #include <vector>
 
 namespace {
@@ -19,10 +20,17 @@ struct Recorder {
     GuestMemoryRec memory{};
     int allocs = 0;
     int frees = 0;
+    int attempts = 0;
+    int throwAt = 0;
+    int failAt = 0;
 };
 
 void* APS5_VABI RecordAlloc(GuestMemoryRec* memory, std::int64_t size) {
-    ++static_cast<Recorder*>(memory->user)->allocs;
+    auto& recorder = *static_cast<Recorder*>(memory->user);
+    ++recorder.attempts;
+    if (recorder.attempts == recorder.throwAt) throw std::runtime_error("allocator failure");
+    if (recorder.attempts == recorder.failAt) return nullptr;
+    ++recorder.allocs;
     return std::malloc(static_cast<std::size_t>(size));
 }
 
@@ -173,6 +181,31 @@ void TruncatedReferences() {
     Require(session.recorder.allocs == 1 && session.recorder.frees == 1, "the reference array is freed on a read error");
 }
 
+void OffsetAllocationFailures() {
+    const Fork fork = MakeFork(0, false);
+    for (bool throws : {false, true}) {
+        Session session(fork.bytes);
+        session.recorder.throwAt = throws ? 2 : 0;
+        session.recorder.failAt = throws ? 0 : 2;
+        std::int64_t sentinel = 0x12345678;
+        std::int64_t* offsets = &sentinel;
+        std::int64_t count = -1;
+        bool threw = false;
+        int error = 0;
+        try {
+            error = FT_Raccess_Get_DataOffsets_nid_postfix(&session.library, &session.stream, 0x140 + 28,
+                0x100, Post, &offsets, &count);
+        } catch (const std::runtime_error& failure) {
+            Require(std::strcmp(failure.what(), "allocator failure") == 0, "the original allocator exception propagates");
+            threw = true;
+        }
+        Require(throws ? threw : !threw && error == 0x40, "offset allocation preserves the exception or allocation error");
+        Require(count == 3 && offsets == &sentinel && sentinel == 0x12345678, "offset allocation failure leaves the caller's result unpublished");
+        Require(session.recorder.attempts == 2 && session.recorder.allocs == 1, "offset allocation fails after allocating the reference table");
+        Require(session.recorder.frees == 1, "offset allocation failure frees the reference table");
+    }
+}
+
 }
 
 int main() {
@@ -180,6 +213,7 @@ int main() {
     HeaderAndOffsets(0x80, true);
     RejectedHeaders();
     TruncatedReferences();
+    OffsetAllocationFailures();
     std::puts("Guest FreeType Ot raccess tests passed");
     return 0;
 }
